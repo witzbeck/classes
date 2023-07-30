@@ -1,0 +1,11 @@
+# gitignore
+
+# file sys
+.vscode/
+.DS_Store
+
+# python sys
+__pycache__/
+
+# sensitive
+*.log
