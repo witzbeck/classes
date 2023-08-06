@@ -19,7 +19,7 @@ def collatz(start_int: int, i: int = 0):
     elif start_int < 2:
         raise ValueError("input must be at least 2")
     x = start_int
-    
+
     while x != 1:
         i += 1
         if x % 2 == 0:
@@ -31,7 +31,3 @@ def collatz(start_int: int, i: int = 0):
 
 def test(ntests: int):
     return [collatz(testint()) for _ in range(ntests)]
-
-
-if __name__ == "__main__":
-    print(test(ntests))
