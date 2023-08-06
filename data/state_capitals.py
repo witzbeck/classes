@@ -78,7 +78,7 @@ class StateCapitals:
 
     def get_rand_idx(self) -> int:
         return randint(0, self.nstates_left - 1)
-    
+
     def pop_rand(self):
         return self.pop_idx(self.get_rand_idx())
 
@@ -106,12 +106,12 @@ def main(
             print(f"{pick} has already been shown.")
         else:
             raise ValueError("input not recognized")
-        
+
         if state is not None:
             print(f"{caps.mk_sentence(state)}\n")
             state = None
 
-        choice = input(f"Wanna know another?? (y/n)\n")
+        choice = input("Wanna know another?? (y/n)\n")
         if caps.nstates_left == 0:
             print("That's all of them!")
         elif choice.lower() in ["y", "yes"]:
@@ -119,6 +119,7 @@ def main(
         elif choice.lower() in ["n", "no"]:
             print("\nIt was nice while it lasted.\n")
             break
+
 
 if __name__ == "__main__":
     main()
