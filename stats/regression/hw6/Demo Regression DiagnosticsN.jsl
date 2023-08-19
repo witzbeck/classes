@@ -1,0 +1,601 @@
+/*
+
+demoRegressionDiagnostics.jsl
+26Mar2003
+
+Copyright (c) 2003 by SAS Institute Inc., Cary, NC 27513, USA. All rights reserved.
+
+Note: please read the disclaimer at the end of this script.
+
+Purpose
+This script demonstrates various principles from the book "Regression Diagnostics: Identifying Influential Data and Sources of Collinearity" by Belsley, Kuh, and Welsch, Wiley (1980). It works with multiple regression problems only involving continuous predictors and no higher order effects.
+
+
+Usage
+Simply run this script by any one of these methods:
+
+	Edit > Run Script
+	Control-R
+	Click "Run Script" button in tool bar
+
+Future Improvement Ideas
+Extend to logistic regression.
+Extend to ANOVA and ANCOVA models.
+
+*/
+
+Clear Globals();
+
+::dlg = Column Dialog(
+	::yCol = Col List( "Y, Response",
+		Data Type( Numeric ),
+		Min Col( 1 ),
+		Max Col( 1 )
+	),
+	::xCol = Col List( "X, Predictors",
+		Data Type( Numeric ),
+		Min Col( 2 )
+	), "",
+	V List(
+		"Regression Options",
+		::opt1 = Check Box( "Intercept", 1 ),
+		::opt2 = Check Box( "Scale Predictors", 0 ),
+		::opt3 = Check Box( "Center Predictors", 0 )
+	),
+	H List(
+		"Significant digits", ::sigDig = Edit Number( 3 )
+	),
+	"Select regression variables"
+);
+
+If( dlg["Button"] == -1, Throw( "User cancelled" ) );
+Remove From( dlg ); Eval List( dlg );
+
+// create container for displays.
+
+::vl = V List Box();
+
+// pick up predictors.
+
+::dt = Current Data Table();
+::n =  N Row( dt );
+::p =  N Items( xCol );
+
+Eval(
+	Substitute(
+		Expr( 	::x = dt << Get As Matrix( lll ) ),
+		Expr( lll ),
+		xCol
+	)
+);
+
+::xNames = {};
+For( ::i=1, i<=p, i++,
+	Insert Into( xNames, Char( xCol[i] ) );
+);
+
+// pick up response.
+
+::yHere = N Items( yCol );
+
+If( yHere,
+	::y = Column( yCol[1] ) << Get As Matrix;
+);
+
+// show data.
+
+If( yHere,
+	vl << Append(
+		Outline Box( "Data Matrix",
+			H List Box(
+				Outline Box( "Y Matrix", Matrix Box( y ) ),
+				Outline Box( "X Matrix", Matrix Box( x ) )
+			),
+			<< Close
+		)
+	),
+
+	vl << Append(
+		Outline Box( "Data Matrix",
+			Outline Box( "X Matrix", Matrix Box( x ) ),
+			<< Close
+		)
+	)
+);
+
+// show pair-wise correlations in predictors.
+
+::t = x` * (Identity( n ) - J( n, n, 1 ) / n) * x;
+::s = Diag( 1 / Sqrt( Vec Diag( t ) ) );
+::corr =  s * t * s;
+
+vl << Append(
+	Outline Box( "Predictor Correlation Matrix",
+		::tb = Table Box(
+			String Col Box( "Correlation", xNames )
+		)
+	)
+);
+
+For( i=1, i<=p, i++,
+	tb << Append(
+		Number Col Box( xNames[i], corr[0,i] )
+	)
+);
+
+// include intercept in design matrix if model requires it.
+
+If( opt1, 
+	p++;
+	x = J( n, 1, 1 ) || x;
+	Insert Into( xNames, "Intercept", 1 );
+);
+
+// scale predictors to unit length.
+
+::xs = x * Inverse( Diag( Sqrt( Vec Diag( x` * x ) ) ) );
+
+// center predictors at zero.
+
+::xc = xs;
+For( i=If( opt1, 1, 2 ), i<=p, i++,
+	xc[0,i] = xs[0,i] - Mean( xs[0,i] );
+);
+
+{::u, ::d, ::v} = SVD( xs );
+
+vl << Append(
+	Outline Box( "Singular Value Decomposition",
+		Outline Box( "U Matrix", Matrix Box( u ) ),
+		Outline Box( "D Matrix", Matrix Box( Diag( d ) ) ),
+		Outline Box( "V Matrix", Matrix Box( v ) ),
+		<< Close
+	)
+);
+
+::sn1 = Maximum( d );
+::ci = sn1 / d;
+::sn2 = Minimum( d[Loc(d>0)] );
+::cn = sn1 / sn2;
+::cns = If(
+	cn < 5, "none",
+	cn < 10, "weak",
+	cn < 30, "moderate",
+	cn < 100, "strong",
+	"very strong"
+);
+
+vl << Append(
+	H List Box(
+		Outline Box( "Condition Index",
+			Table Box(
+				Number Col Box( "Singular Value", d ),
+				Number Col Box( "Condition Index", ci )
+			)
+		),
+		Outline Box( "Condition Number",
+			Table Box(
+				String Col Box( "Source",
+					{
+					"Spectral Norm X",
+					"Spectral Norm Inv(X)",
+					"Kappa(X)"
+					}
+				),
+				Number Col Box( "Value", Matrix( {sn1, sn2, cn} ) )
+			),
+			Text Box( "Collinearity is " || cns )
+		),
+		Outline Box( "Solution Imprecision",
+			Table Box(
+				String Col Box( "Source",
+					{
+					"Data",
+					"Conditioning",
+					"Solution"
+					}
+				),
+				Number Col Box( "Sig Digits",
+					Matrix(
+						{
+						Round( sigDig ),
+						-Round( Log10( cn ) ),
+						Round( sigDig ) - Round( Log10( cn ) )
+						}
+					)
+				)
+			)
+		)
+	)
+);
+
+vl << Append(
+	Outline Box( "Parameter Variance Decomposition",
+		tb = Table Box( Number Col Box( "Condition Index", ci ) )
+	)
+);
+
+For( ::k=1, k<=p, k++,
+	::phi = J( p, 1, 0 );
+	For( ::j=1, j<=p, j++,
+		phi[j] = (v[k,j])^2 / (d[j])^2;
+	);
+	tb << Append(
+		Number Col Box( "Var(" || xNames[k] || ")",
+			Matrix( phi/Sum(phi) ),
+			<< Set Format( 8, 4 )
+		)
+	);
+);
+
+vl << Append(
+	Outline Box( "Eigen Analysis of X'X",
+		Table Box(
+			Number Col Box( "Eigen Values", d^2 ),
+			Matrix Box( v )
+		),
+		<< Close
+	)
+);
+
+// compute regression.
+
+If( yHere,
+
+	// choose design matrix.
+
+	If(
+		opt2,
+			x = xs,
+
+		opt3,
+			x = xc
+	);
+
+	// show regression matrices.
+
+	::xpx = x` * x;
+	::xpxi = Inverse( xpx );
+	::hat =  x * xpxi * x`;
+
+	vl << Append(
+		Outline Box( "Variance-Covariance Matrix",
+			Outline Box( "X'X", Matrix Box( xpx ) ),
+			Outline Box( "Inv(X'X)", Matrix Box( xpxi ) ),
+			<< Close
+		)
+	);
+
+	vl << Append(
+		Outline Box( "Projection (Hat) Matrix", Matrix Box( hat ), << Close )
+	);
+
+	::a = ( x`*x || x`*y ) |/ ( y`*x || y`*y );
+
+	vl << Append(
+		Outline Box( "Sweep Operator",
+			Outline Box( "Augmented Statistical Matrix",
+				H List Box(
+					Outline Box( "Values", Matrix Box( a ) ),
+					Outline Box( "Interpretation",
+						Table Box(
+							String Col Box("", {"X'X", "Y'X"} ),
+							String Col Box("", {"X'Y", "Y'Y"} )
+						)
+					)
+				)
+			),
+			Outline Box( "Full Sweep",
+				H List Box(
+					Outline Box( "Values", Matrix Box( a = Sweep( a, 1::p ) ) ),
+					Outline Box( "Interpretation",
+						Table Box(
+							String Col Box("", {"Inv(X'X)", "   -b"} ),
+							String Col Box("", {" b", "ESS"} )
+						)
+					)
+				)
+			),
+			<< Close
+		)
+	);
+
+	::beta = xpxi * x` * y;
+	::vif =  Vec Diag( Inverse( corr ) );
+	If( opt1, vif = [.] |/ vif );
+
+	vl << Append(
+		Outline Box( "Parameters",
+			Table Box(
+				String Col Box( "Parameter", xNames ),
+				Number Col Box( "Beta", beta ),
+				Number Col Box( "VIF", vif )
+			)
+		)
+	);
+
+	::yHat = x * beta;
+	::res = y - yHat;
+	vl << Append(
+		Outline Box( "Regression",
+			tb = Table Box(
+				Number Col Box( "Obs", 1::n ),
+				Number Col Box( "Y", y ),
+				Number Col Box( "Pred Y", yHat ),
+				Number Col Box( "Residual", res )
+			)
+		)
+	);
+
+	::s = Sqrt( a[p+1,p+1] / ( n - p ) );
+	::stdRes = ::si = ::tRes = ::cookD = ::atkC = ::covRatio = ::dfFits = J( n, 1, . );
+	::dfBetas = J( n, p, . );
+	::c = xpxi * x`;
+
+	For( i=1, i<=n, i++,
+
+		::h = hat[i,i];
+		::rh = Sqrt( 1-h );
+		::qh = h / ( 1-h );
+
+		stdRes[i] = res[i] / (s*rh);
+
+		si[i] = Sqrt( ((n-p)*s^2 - (res[i]^2/(1-h))) / (n-p-1) );
+
+		tRes[i] = res[i] / (si[i] * rh);
+
+		cookD[i] = ((stdRes[i])^2 / p) * qh;
+
+		atkC[i] = Abs( tRes[i] ) * Sqrt( ((n-p)/p) * qh );
+
+		covRatio[i] = 1 / ((((n-p-1)/(n-p)) + (tRes[i]^2/(n-p)))^p * (1-h));
+
+		dfFits[i] = Sqrt( qh ) * (res[i]/(si[i]*rh));
+
+		For( j=1, j<=p, j++,
+			dfBetas[i,j] = (c[j,i]*res[i])/(Sqrt(xpxi[j,j])*si[i]*(1-h));
+		);
+	);
+
+	hatDiag = Vec Diag( hat );
+	tb	<< Append( Number Col Box( "Standardized", stdRes ), << Set Format( 8, 4 ) )
+		<< Append( Number Col Box( "Studentized", tRes ), << Set Format( 8, 4 ) )
+		<< Append( Number Col Box( "Cook's D", cookD ), << Set Format( 8, 4 ) )
+		<< Append( Number Col Box( "Atkinson's C", atkC ), << Set Format( 8, 4 ) )
+		<< Append( Number Col Box( "Std Dev(i)", si ) )
+		<< Append( Number Col Box( "Hat Diagonal", hatDiag ) )
+		<< Append( Number Col Box( "COVRATIO", covRatio ) )
+		<< Append( Number Col Box( "DFFITS", dfFits ), << Set Format( 8, 4 ) );
+
+	For( i=1, i<=N Col(dfBetas), i++,
+		tb << Append(
+			Number Col Box( "DFBETAS(" || xNames[i] || ")", dfBetas[0,i] ),
+			<< Set Format( 8, 4 )
+		);
+	);
+);
+
+hl = H List Box();
+len = 125;
+
+hl << Append(
+	V List Box(
+		Outline Box( "Actual by Predicted",
+			Graph Box(
+				Frame Size( len, len ),
+				X Name( "Predicted" ),
+				X Scale( Min( yHat ), Max( yHat ) ),
+				Y Name( "Actual" ),
+				Y Scale( Min( y ), Max( y ) ),
+				Marker( 0, yHat, y );
+				Pen Color( "Red" );
+				Y Function( x, x );
+			)
+		),
+		Outline Box( "Residual by Predicted",
+			Graph Box(
+				Frame Size( len, len ),
+				X Name( "Predicted" ),
+				X Scale( Min( yHat ), Max( yHat ) ),
+				Y Name( "Residual" ),
+				Y Scale( 1.1 * Min( res ), 1.1 * Max( res ) ),
+				Marker( 0, yHat, res );
+				Pen Color( "Red" );
+				H Line( 0 );
+			)
+		)
+	)
+);
+
+hl << Append(
+	V List Box(
+		Outline Box( "Studentized by Predicted",
+			Graph Box(
+				Frame Size( len, len ),
+				X Name( "Predicted" ),
+				X Scale( Min( yHat ), Max( yHat ) ),
+				Y Name( "Studentized Residual" ),
+				Y Scale( 1.1 * Min( tRes ), 1.1 * Max( tRes ) ),
+				Marker( 0, yHat, tRes );
+				Pen Color( "Red" );
+				H Line( 0 );
+			)
+		),
+		Outline Box( "Studentized by Hat",
+			Graph Box(
+				Frame Size( len, len ),
+				X Name( "Hat Diagonal" ),
+				X Scale( 0, 1 ),
+				Y Name( "Studentized Residual" ),
+				Y Scale( 1.1 * Min( tRes ), 1.1 * Max( tRes ) ),
+				Marker( 0, hatDiag, tRes );
+			)
+		)
+	)
+);
+
+hl << Append(
+	V List Box(
+		Outline Box( "Hat by Row",
+			Graph Box(
+				Frame Size( len, len ),
+				X Name( "Row" ),
+				X Scale( 0, n + 1 ),
+				Y Name( "Hat Diagonal" ),
+				Y Scale( 0, 1 ),
+				For( i=1, i<=n, i++,
+					V Line( i, 0, hatDiag[i] );
+				);
+				Pen Color( "Red" );
+				H Line( 2 * p / n );
+			)
+		),
+		Outline Box( "COVRATIO by Row",
+			Graph Box(
+				Frame Size( len, len ),
+				X Name( "Row" ),
+				X Scale( 0, n + 1 ),
+				Y Name( "COVRATIO" ),
+				Y Scale( 0, 1.1 * Max( covRatio ) ),
+				For( i=1, i<=n, i++,
+					V Line( i, 0, covRatio[i] );
+				);
+				Pen Color( "Red" );
+				H Line( 1 + 3 * p / n );
+			)
+		)
+	)
+);
+
+hl << Append(
+	V List Box(
+		Outline Box( "DFFITS by Row",
+			Graph Box(
+				Frame Size( len, len ),
+				X Name( "Row" ),
+				X Scale( 0, n + 1 ),
+				Y Name( "DFFITS" ),
+				Y Scale( 1.1 * Min( dfFits ), 1.1 * Max( dfFits ) ),
+				For( i=1, i<=n, i++,
+					V Line( i, 0, dfFits[i] );
+				);
+				Pen Color( "Red" );
+				H Line(  2 * Sqrt( p / n ) );
+				H Line( -2 * Sqrt( p / n ) );
+			)
+		),
+		Outline Box( "Cook's D by Row",
+			Graph Box(
+				Frame Size( len, len ),
+				X Name( "Row" ),
+				X Scale( 0, n + 1 ),
+				Y Name( "Cook's D" ),
+				Y Scale( 0, 1.1 * Max( cookD ) ),
+				For( i=1, i<=n, i++,
+					V Line( i, 0, cookD[i] );
+				);
+				Pen Color( "Red" );
+				H Line( 4 / n );
+			)
+		)
+	)
+);
+
+hl << Append(
+	V List Box(
+		Outline Box( "Atkinson's C by Row",
+			Graph Box(
+				Frame Size( len, len ),
+				X Name( "Row" ),
+				X Scale( 0, n + 1 ),
+				Y Name( "Atkinson's C" ),
+				Y Scale( -1.1 * Min( atkC ), 1.1 * Max( atkC ) ),
+				For( i=1, i<=n, i++,
+					V Line( i, 0, atkC[i] );
+				);
+			)
+		),
+		Outline Box( "SD(i) by Row",
+			Graph Box(
+				Frame Size( len, len ),
+				X Name( "Row" ),
+				X Scale( 0, n + 1 ),
+				Y Name( "Std Dev(i)" ),
+				Y Scale( 0, 1.1 * Max( si ) ),
+				For( i=1, i<=n, i++,
+					V Line( i, 0, si[i] );
+				);
+			)
+		)
+	)
+);
+
+rd = New Table( "Regression Diagnostics" );
+rd	<< New Column( "Actual", Values( y ) )
+	<< New Column( "Predicted", Values( yHat ) )
+	<< New Column( "Residual", Values( res ) )
+	<< New Column( "Studentized", Values( tRes ) )
+	<< New Column( "Cook D", Values( cookD ) );
+Current Data Table( rd );
+
+w = New Window( "Regression Diagnostics",
+	hl,
+	Distribution(
+		Y(
+			:Residual,
+			:Studentized,
+			:Cook D
+		),
+		Outlier Box Plot( 0 ),
+		Quantiles( 0 ),
+		Moments( 0 ),
+		Normal Quantile Plot( 1 )
+	),
+	vl
+);
+
+Current Data Table( dt );
+yExpr = Expr( Y() );
+Insert Into( yExpr, Column( yCol[1] ) );
+eExpr = Expr( Effects() );
+For( ::i = 1, ::i <= N Items( xCol ), ::i++,
+	Insert Into( eExpr, Column( xCol[i] ) );
+);
+fmExpr = Expr(
+	Fit Model(
+		Personality( Standard Least Squares ),
+		Emphasis( Effect Leverage )
+	);
+);
+Insert Into( fmExpr, Name Expr( yExpr ) );
+Insert Into( fmExpr, Name Expr( eExpr ) );
+fm = fmExpr;
+
+If( Not( opt1 ), fm << No Intercept );
+
+fit = fm << Run Model;
+fm << Close Window;
+
+/*
+Revision History (date, change, person)
+26Mar2003, created, 
+13Oct2003, added diagnostic plots, 
+*/
+
+/*
+Disclaimer by 
+SAS Institute Inc. 
+
+License Agreement for Corrective Code or 
+Additional Functionality 
+
+SAS INSTITUTE INC. IS PROVIDING YOU WITH THE COMPUTER SOFTWARE CODE INCLUDED WITH THIS AGREEMENT ("CODE") ON AN "AS IS" BASIS, AND AUTHORIZES YOU TO USE THE CODE SUBJECT TO THE TERMS HEREOF.  BY USING THE CODE, YOU AGREE TO THESE TERMS.  YOUR USE OF THE CODE IS AT YOUR OWN RISK.  SAS INSTITUTE INC. MAKES NO REPRESENTATION OR WARRANTY, EXPRESS OR IMPLIED, INCLUDING, BUT NOT LIMITED TO, WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, NONINFRINGEMENT AND TITLE, WITH RESPECT TO THE CODE. 
+
+The Code is intended to be used solely as part of a product ("Software") you currently have licensed from SAS or one of its subsidiaries or authorized agents ("SAS"). The Code is designed to either correct an error in the Software or to add functionality to the Software, but has not necessarily been tested.  Accordingly, SAS makes no representation or warranty that the Code will operate error-free.  SAS is under no obligation to maintain or support the Code.
+
+Neither SAS nor its licensors shall be liable to you or any third party for any general, special, direct, indirect, consequential, incidental or other damages whatsoever arising out of or related to your use or inability to use the Code, even if SAS has been advised of the possibility of such damages.
+
+Except as otherwise provided above, the Code is governed by the same agreement that governs the Software.  If you do not have an existing agreement with SAS governing the Software, you may not use the Code. 
+
+(SAS and all other SAS Institute Inc. product or service names are registered trademarks or trademarks of SAS Institute Inc. in the USA and other countries. ® indicates USA registration. Other brand and product names are registered trademarks or trademarks of their respective companies.)
+*/
